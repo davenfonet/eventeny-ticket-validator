@@ -126,6 +126,11 @@
             background: #f0fff4;
         }
 
+        .summary-card.concern {
+            border-left-color: #8e44ad;
+            background: #f8f0ff;
+        }
+
         .summary-card h3 {
             font-size: 2em;
             color: #333;
@@ -162,6 +167,11 @@
         .account-item.potential {
             border-left: 4px solid #f39c12;
             background: #fffbf0;
+        }
+
+        .account-item.concern {
+            border-left: 4px solid #8e44ad;
+            background: #f8f0ff;
         }
 
         .ticket-details-toggle {
@@ -336,6 +346,11 @@
 
         .badge.valid {
             background: #27ae60;
+            color: white;
+        }
+
+        .badge.concern {
+            background: #8e44ad;
             color: white;
         }
 
@@ -832,16 +847,42 @@
             return result;
         }
 
+        // Weekend/Ultra badges - full access, do not trigger Kanno concern
+        const FULL_ACCESS_BADGES = ['2026 Weekend Membership', '2026 AB Ultra Membership', '2026 Friday'];
+
+        // Check if account has non-weekend non-ultra badge (day pass, dealer, artist, etc.)
+        function hasNonWeekendNonUltraBadge(account) {
+            return (account.badgeItems || []).some(b =>
+                !FULL_ACCESS_BADGES.some(full => b.name.includes(full))
+            );
+        }
+
+        // Check if account has a Kanno (Yoko Kanno Concert) ticket
+        function hasKannoTicket(account) {
+            return (account.ticketItems || []).some(t =>
+                t.name.toLowerCase().includes('kanno')
+            );
+        }
+
         // Validate accounts
         function validateAccounts(accounts) {
             const rules = getValidationRules();
+            const kannoConcern = [];
             const fraudulent = [];
             const potentiallyFraudulent = [];
             const valid = [];
 
             accounts.forEach(account => {
                 const issues = [];
-                
+
+                // Rule 0: Non-weekend non-ultra badge + Kanno ticket = concern (purple, top of list)
+                if (hasNonWeekendNonUltraBadge(account) && hasKannoTicket(account)) {
+                    issues.push({
+                        type: 'concern',
+                        message: 'Account has a non-weekend/non-ultra badge with a Yoko Kanno Concert ticket'
+                    });
+                }
+
                 // Rule 1: More than max tickets = fraudulent
                 if (account.tickets > rules.maxTickets) {
                     issues.push({
@@ -856,12 +897,12 @@
                     (account.ticketNames || []).filter(name => !isBadge(name)).forEach(name => {
                         ticketCountByType[name] = (ticketCountByType[name] || 0) + 1;
                     });
-                    const fraudulentTypesOverThreshold = rules.fraudulentTicketTypes.filter(fraudType => 
+                    const fraudulentTypesOverThreshold = rules.fraudulentTicketTypes.filter(fraudType =>
                         (ticketCountByType[fraudType] || 0) > 4
                     );
-                    
+
                     if (fraudulentTypesOverThreshold.length > 0) {
-                        const details = fraudulentTypesOverThreshold.map(fraudType => 
+                        const details = fraudulentTypesOverThreshold.map(fraudType =>
                             `${fraudType} (${ticketCountByType[fraudType]} tickets)`
                         );
                         issues.push({
@@ -892,7 +933,10 @@
                     issues: issues
                 };
 
-                if (issues.some(i => i.type === 'fraudulent')) {
+                // Kanno concern takes precedence - appears at top of list
+                if (issues.some(i => i.type === 'concern')) {
+                    kannoConcern.push(accountData);
+                } else if (issues.some(i => i.type === 'fraudulent')) {
                     fraudulent.push(accountData);
                 } else if (issues.length > 0) {
                     potentiallyFraudulent.push(accountData);
@@ -901,17 +945,21 @@
                 }
             });
 
-            return { fraudulent, potentiallyFraudulent, valid };
+            return { kannoConcern, fraudulent, potentiallyFraudulent, valid };
         }
 
         // Display results
         function displayResults(validationResults) {
             lastValidationResults = validationResults;
-            const { fraudulent, potentiallyFraudulent, valid } = validationResults;
-            const total = fraudulent.length + potentiallyFraudulent.length + valid.length;
+            const { kannoConcern, fraudulent, potentiallyFraudulent, valid } = validationResults;
+            const total = kannoConcern.length + fraudulent.length + potentiallyFraudulent.length + valid.length;
 
-            // Update summary
+            // Update summary - concern first
             const summaryHTML = `
+                <div class="summary-card concern">
+                    <h3>${kannoConcern.length}</h3>
+                    <p>Kanno Concern</p>
+                </div>
                 <div class="summary-card fraudulent">
                     <h3>${fraudulent.length}</h3>
                     <p>Fraudulent Accounts</p>
@@ -931,8 +979,9 @@
             `;
             document.getElementById('summary').innerHTML = summaryHTML;
 
-            // Display account list
+            // Display account list - concern at top
             const accountListHTML = [
+                ...kannoConcern.map(acc => renderAccount(acc, 'concern')),
                 ...fraudulent.map(acc => renderAccount(acc, 'fraudulent')),
                 ...potentiallyFraudulent.map(acc => renderAccount(acc, 'potential')),
                 ...valid.map(acc => renderAccount(acc, 'valid'))
@@ -944,10 +993,12 @@
 
         // Render account item
         function renderAccount(account, type) {
-            const badgeClass = type === 'fraudulent' ? 'fraudulent' : 
+            const badgeClass = type === 'concern' ? 'concern' :
+                              type === 'fraudulent' ? 'fraudulent' :
                               type === 'potential' ? 'potential' : 'valid';
-            const badgeText = type === 'fraudulent' ? 'FRAUDULENT' : 
-                            type === 'potential' ? 'POTENTIALLY FRAUDULENT' : 'VALID';
+            const badgeText = type === 'concern' ? 'KANNO CONCERN' :
+                             type === 'fraudulent' ? 'FRAUDULENT' :
+                             type === 'potential' ? 'POTENTIALLY FRAUDULENT' : 'VALID';
 
             const issuesHTML = account.issues.length > 0
                 ? `<div class="account-issues">
@@ -958,9 +1009,9 @@
                    </div>`
                 : '';
 
-            // Build tickets and badges dropdown (only for fraudulent and potentially fraudulent)
+            // Build tickets and badges dropdown (for concern, fraudulent, and potentially fraudulent)
             let ticketDetailsHTML = '';
-            if ((type === 'fraudulent' || type === 'potential') && 
+            if ((type === 'concern' || type === 'fraudulent' || type === 'potential') &&
                 ((account.badgeItems && account.badgeItems.length > 0) || 
                  (account.ticketItems && account.ticketItems.length > 0))) {
                 
@@ -1039,7 +1090,7 @@
         // Build report data from validation results
         function buildReportData() {
             if (!lastValidationResults) return [];
-            const { fraudulent, potentiallyFraudulent, valid } = lastValidationResults;
+            const { kannoConcern, fraudulent, potentiallyFraudulent, valid } = lastValidationResults;
             const rows = [];
             const addAccount = (acc, status) => {
                 const badgeTypes = (acc.badgeItems || []).map(i => i.name).join('; ');
@@ -1055,9 +1106,10 @@
                     Issues: issues
                 });
             };
-            fraudulent.forEach(acc => addAccount(acc, 'Fraudulent'));
-            potentiallyFraudulent.forEach(acc => addAccount(acc, 'Potentially Fraudulent'));
-            valid.forEach(acc => addAccount(acc, 'Valid'));
+            (kannoConcern || []).forEach(acc => addAccount(acc, 'Kanno Concern'));
+            (fraudulent || []).forEach(acc => addAccount(acc, 'Fraudulent'));
+            (potentiallyFraudulent || []).forEach(acc => addAccount(acc, 'Potentially Fraudulent'));
+            (valid || []).forEach(acc => addAccount(acc, 'Valid'));
             return rows;
         }
 
