@@ -520,6 +520,64 @@
         .select-all-button:hover {
             background: #f0f2ff;
         }
+
+        .report-section {
+            margin-top: 40px;
+            padding: 24px;
+            background: #f8f9ff;
+            border-radius: 8px;
+            border: 1px solid #e0e4f0;
+        }
+
+        .report-section h3 {
+            color: #333;
+            margin-bottom: 8px;
+            font-size: 1.3em;
+        }
+
+        .report-description {
+            color: #666;
+            margin-bottom: 16px;
+            font-size: 0.95em;
+        }
+
+        .report-buttons {
+            display: flex;
+            gap: 12px;
+            flex-wrap: wrap;
+        }
+
+        .export-button {
+            padding: 10px 20px;
+            border: none;
+            border-radius: 6px;
+            font-size: 0.95em;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        .export-csv {
+            background: #28a745;
+            color: white;
+        }
+
+        .export-csv:hover {
+            background: #218838;
+            transform: translateY(-1px);
+        }
+
+        .export-excel {
+            background: #217346;
+            color: white;
+        }
+
+        .export-excel:hover {
+            background: #1a5c38;
+            transform: translateY(-1px);
+        }
     </style>
 </head>
 <body>
@@ -554,7 +612,7 @@
                 </div>
                 <div class="setting-group" id="ticketTypeFilterGroup" style="display: none;">
                     <label>Fraudulent Ticket Types:</label>
-                    <div class="setting-description">Select ticket types that should be flagged as fraudulent</div>
+                    <div class="setting-description">Accounts with more than 4 tickets of these types will be flagged as fraudulent</div>
                     <div class="select-all-buttons">
                         <button type="button" class="select-all-button" onclick="selectAllTicketTypes(true)">Select All</button>
                         <button type="button" class="select-all-button" onclick="selectAllTicketTypes(false)">Deselect All</button>
@@ -575,26 +633,35 @@
         <div id="results" class="results">
             <div class="summary" id="summary"></div>
             <div class="account-list" id="accountList"></div>
+            <div class="report-section" id="reportSection">
+                <h3>📊 Export Report</h3>
+                <p class="report-description">Download the validation results as a report file</p>
+                <div class="report-buttons">
+                    <button type="button" class="export-button export-csv" id="exportCsvBtn">📄 Download CSV</button>
+                    <button type="button" class="export-button export-excel" id="exportExcelBtn">📗 Download Excel</button>
+                </div>
+            </div>
         </div>
 
         <div id="error" class="error" style="display: none;"></div>
     </div>
 
+    <script src="https://cdn.sheetjs.com/xlsx-0.20.1/package/dist/xlsx.full.min.js"></script>
     <script>
         // Store parsed accounts for re-validation
         let parsedAccounts = null;
         let allTicketTypes = [];
+        let lastValidationResults = null;
 
         // Badge types - these are convention badges
         const BADGE_TYPES = [
-            'Registration 3 Day',
-            'Registration Friday',
-            'Registration Saturday',
-            'Registration Sunday',
-            'Registration - Child',
-            'Registration - Youth',
-            "Dealer's Badge",
-            "Dealer's Comp Badge"
+            '2026 Weekend Membership',
+            '2026 AB Ultra Membership',
+            '2026 Friday',
+            '2026 Saturday',
+            '2026 Sunday',
+            "Dealer's (Included)",
+            "Artist's (Included)"
         ];
 
         // Get current validation rules
@@ -715,9 +782,6 @@
                 if (!accounts[email].badgeItems) accounts[email].badgeItems = [];
                 if (!accounts[email].ticketItems) accounts[email].ticketItems = [];
 
-                accounts[email].tickets++;
-                accounts[email].ticketNames.push(ticketName);
-
                 const item = {
                     id: ticketId,
                     name: ticketName
@@ -727,6 +791,8 @@
                     accounts[email].badges++;
                     accounts[email].badgeItems.push(item);
                 } else {
+                    accounts[email].tickets++;
+                    accounts[email].ticketNames.push(ticketName);
                     accounts[email].ticketItems.push(item);
                 }
             }
@@ -784,20 +850,23 @@
                     });
                 }
 
-                // Rule 2: Has fraudulent ticket types = fraudulent
+                // Rule 2: Has more than 4 tickets of fraudulent ticket types = fraudulent
                 if (rules.fraudulentTicketTypes && rules.fraudulentTicketTypes.length > 0) {
-                    const accountTicketTypes = new Set(account.ticketNames.filter(name => !isBadge(name)));
-                    const hasFraudulentType = rules.fraudulentTicketTypes.some(fraudType => 
-                        accountTicketTypes.has(fraudType)
+                    const ticketCountByType = {};
+                    (account.ticketNames || []).filter(name => !isBadge(name)).forEach(name => {
+                        ticketCountByType[name] = (ticketCountByType[name] || 0) + 1;
+                    });
+                    const fraudulentTypesOverThreshold = rules.fraudulentTicketTypes.filter(fraudType => 
+                        (ticketCountByType[fraudType] || 0) > 4
                     );
                     
-                    if (hasFraudulentType) {
-                        const fraudulentTypesFound = rules.fraudulentTicketTypes.filter(fraudType => 
-                            accountTicketTypes.has(fraudType)
+                    if (fraudulentTypesOverThreshold.length > 0) {
+                        const details = fraudulentTypesOverThreshold.map(fraudType => 
+                            `${fraudType} (${ticketCountByType[fraudType]} tickets)`
                         );
                         issues.push({
                             type: 'fraudulent',
-                            message: `Account has fraudulent ticket types: ${fraudulentTypesFound.join(', ')}`
+                            message: `Account has more than 4 tickets of fraudulent types: ${details.join(', ')}`
                         });
                     }
                 }
@@ -837,6 +906,7 @@
 
         // Display results
         function displayResults(validationResults) {
+            lastValidationResults = validationResults;
             const { fraudulent, potentiallyFraudulent, valid } = validationResults;
             const total = fraudulent.length + potentiallyFraudulent.length + valid.length;
 
@@ -943,9 +1013,8 @@
                         <span class="badge ${badgeClass}">${badgeText}</span>
                     </div>
                     <div class="account-stats">
-                        <div class="stat"><strong>Total Tickets:</strong> ${account.tickets}</div>
+                        <div class="stat"><strong>Tickets:</strong> ${account.tickets}</div>
                         <div class="stat"><strong>Badges:</strong> ${account.badges}</div>
-                        <div class="stat"><strong>Other Tickets:</strong> ${account.tickets - account.badges}</div>
                     </div>
                     ${issuesHTML}
                     ${ticketDetailsHTML}
@@ -966,6 +1035,80 @@
 
         // Make toggleTicketDetails available globally
         window.toggleTicketDetails = toggleTicketDetails;
+
+        // Build report data from validation results
+        function buildReportData() {
+            if (!lastValidationResults) return [];
+            const { fraudulent, potentiallyFraudulent, valid } = lastValidationResults;
+            const rows = [];
+            const addAccount = (acc, status) => {
+                const badgeTypes = (acc.badgeItems || []).map(i => i.name).join('; ');
+                const ticketTypes = (acc.ticketItems || []).map(i => i.name).join('; ');
+                const issues = (acc.issues || []).map(i => i.message).join('; ');
+                rows.push({
+                    Email: acc.email,
+                    Status: status,
+                    'Tickets Count': acc.tickets,
+                    'Badges Count': acc.badges,
+                    'Badge Types': badgeTypes,
+                    'Ticket Types': ticketTypes,
+                    Issues: issues
+                });
+            };
+            fraudulent.forEach(acc => addAccount(acc, 'Fraudulent'));
+            potentiallyFraudulent.forEach(acc => addAccount(acc, 'Potentially Fraudulent'));
+            valid.forEach(acc => addAccount(acc, 'Valid'));
+            return rows;
+        }
+
+        // Escape CSV field (handle quotes and commas)
+        function escapeCSVField(val) {
+            if (val == null) return '';
+            const str = String(val);
+            if (str.includes(',') || str.includes('"') || str.includes('\n')) {
+                return '"' + str.replace(/"/g, '""') + '"';
+            }
+            return str;
+        }
+
+        // Export report as CSV
+        function exportReportCSV() {
+            const rows = buildReportData();
+            if (rows.length === 0) {
+                alert('No data to export. Please upload and validate a CSV file first.');
+                return;
+            }
+            const headers = Object.keys(rows[0]);
+            const csvLines = [headers.map(escapeCSVField).join(',')];
+            rows.forEach(row => {
+                csvLines.push(headers.map(h => escapeCSVField(row[h])).join(','));
+            });
+            const csv = csvLines.join('\n');
+            const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `validation-report-${new Date().toISOString().slice(0, 10)}.csv`;
+            a.click();
+            URL.revokeObjectURL(url);
+        }
+
+        // Export report as Excel
+        function exportReportExcel() {
+            const rows = buildReportData();
+            if (rows.length === 0) {
+                alert('No data to export. Please upload and validate a CSV file first.');
+                return;
+            }
+            if (typeof XLSX === 'undefined') {
+                alert('Excel export requires the SheetJS library. Please check your connection.');
+                return;
+            }
+            const ws = XLSX.utils.json_to_sheet(rows);
+            const wb = XLSX.utils.book_new();
+            XLSX.utils.book_append_sheet(wb, ws, 'Validation Report');
+            XLSX.writeFile(wb, `validation-report-${new Date().toISOString().slice(0, 10)}.xlsx`);
+        }
 
         // Handle file upload
         function handleFile(file) {
@@ -1090,6 +1233,10 @@
 
         // Re-validate button
         document.getElementById('revalidateButton').addEventListener('click', revalidate);
+
+        // Export report buttons
+        document.getElementById('exportCsvBtn').addEventListener('click', exportReportCSV);
+        document.getElementById('exportExcelBtn').addEventListener('click', exportReportExcel);
 
         // Auto re-validate when rules change (optional - can be removed if too frequent)
         // Uncomment if you want instant re-validation on rule changes:

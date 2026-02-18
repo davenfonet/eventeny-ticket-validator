@@ -26,14 +26,7 @@ The CSV file must contain the following columns:
 - `Ticket name` - Used to distinguish between badges and tickets
 
 ### Badge Types (Convention Badges)
-- Registration 3 Day
-- Registration Friday
-- Registration Saturday
-- Registration Sunday
-- Registration - Child
-- Registration - Youth
-- Dealer's Badge
-- Dealer's Comp Badge
+- 2026 Weekend Membership
 
 ### Ticket Types
 - Friday Concert VIP
