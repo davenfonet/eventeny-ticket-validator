@@ -675,7 +675,7 @@
             '2026 Friday',
             '2026 Saturday',
             '2026 Sunday',
-            'Group Membership',
+            '2026 Weekend Group Membership',
             "Dealer's (Included)",
             "Artist's (Included)"
         ];
@@ -755,6 +755,9 @@
             const idIndex = header.findIndex(col => 
                 col.toLowerCase().trim() === 'id' || col.toLowerCase().includes(' id ')
             );
+            const tagsIndex = header.findIndex(col => 
+                col.toLowerCase().trim() === 'tags'
+            );
 
             if (purchaserEmailIndex === -1 || ticketNameIndex === -1) {
                 throw new Error('CSV must contain "Purchaser email" and "Ticket name" columns');
@@ -790,8 +793,17 @@
                         tickets: 0,
                         ticketNames: [],
                         badgeItems: [],
-                        ticketItems: []
+                        ticketItems: [],
+                        has26YKValidated: false
                     };
+                }
+
+                // Check for 26YK-Validated tag (overrides other validation)
+                if (tagsIndex >= 0 && row.length > tagsIndex) {
+                    const tags = (row[tagsIndex] || '').trim();
+                    if (tags.includes('26YK-Validated')) {
+                        accounts[email].has26YKValidated = true;
+                    }
                 }
                 
                 // Ensure arrays exist
@@ -849,7 +861,7 @@
         }
 
         // Weekend/Ultra badges - full access, do not trigger Kanno concern
-        const FULL_ACCESS_BADGES = ['2026 Weekend Membership', '2026 AB Ultra Membership', '2026 Friday', 'Group Membership'];
+        const FULL_ACCESS_BADGES = ['2026 Weekend Membership', '2026 AB Ultra Membership', '2026 Friday', '2026 Weekend Group Membership'];
 
         // Check if account has non-weekend non-ultra badge (day pass, dealer, artist, etc.)
         function hasNonWeekendNonUltraBadge(account) {
@@ -931,11 +943,15 @@
 
                 const accountData = {
                     ...account,
-                    issues: issues
+                    issues: account.has26YKValidated
+                        ? [{ type: 'valid', message: 'Validated via 26YK-Validated tag (other checks overridden)' }]
+                        : issues
                 };
 
-                // Kanno concern takes precedence - appears at top of list
-                if (issues.some(i => i.type === 'concern')) {
+                // 26YK-Validated tag overrides all other checks - always valid
+                if (account.has26YKValidated) {
+                    valid.push(accountData);
+                } else if (issues.some(i => i.type === 'concern')) {
                     kannoConcern.push(accountData);
                 } else if (issues.some(i => i.type === 'fraudulent')) {
                     fraudulent.push(accountData);
