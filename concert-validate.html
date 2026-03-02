@@ -625,9 +625,39 @@
                     </div>
                     <div class="setting-description">Accounts with tickets but no convention badges will be flagged as potentially fraudulent</div>
                 </div>
+                <div class="setting-group">
+                    <label for="fraudulentTicketThreshold">Fraudulent ticket type threshold:</label>
+                    <input type="number" id="fraudulentTicketThreshold" min="1" value="4" />
+                    <div class="setting-description">Accounts with more than this many tickets of a fraudulent type will be flagged</div>
+                </div>
+                <div class="setting-group">
+                    <label for="validationOverrideTag">Validation override tag:</label>
+                    <input type="text" id="validationOverrideTag" value="26YK-Validated" style="width: 100%; max-width: 300px;" />
+                    <div class="setting-description">Accounts with this tag in the CSV Tags column are always marked valid</div>
+                </div>
+                <div class="setting-group">
+                    <label for="badgeTypes">Badge types (one per line):</label>
+                    <textarea id="badgeTypes" rows="6" style="width: 100%; font-family: monospace; font-size: 0.9em;">2026 Weekend Membership
+2026 AB Ultra Membership
+2026 Friday
+2026 Saturday
+2026 Sunday
+2026 Weekend Group Membership
+Dealer's (Included)
+Artist's (Included)</textarea>
+                    <div class="setting-description">Ticket names containing these strings are counted as badges</div>
+                </div>
+                <div class="setting-group">
+                    <label for="fullAccessBadges">Full access badges for Kanno rule (one per line):</label>
+                    <textarea id="fullAccessBadges" rows="4" style="width: 100%; font-family: monospace; font-size: 0.9em;">2026 Weekend Membership
+2026 AB Ultra Membership
+2026 Friday
+2026 Weekend Group Membership</textarea>
+                    <div class="setting-description">Badges in this list do not trigger the Kanno concern when combined with a Kanno ticket</div>
+                </div>
                 <div class="setting-group" id="ticketTypeFilterGroup" style="display: none;">
                     <label>Fraudulent Ticket Types:</label>
-                    <div class="setting-description">Accounts with more than 4 tickets of these types will be flagged as fraudulent</div>
+                    <div class="setting-description">Accounts with more than the threshold (above) tickets of these types will be flagged as fraudulent</div>
                     <div class="select-all-buttons">
                         <button type="button" class="select-all-button" onclick="selectAllTicketTypes(true)">Select All</button>
                         <button type="button" class="select-all-button" onclick="selectAllTicketTypes(false)">Deselect All</button>
@@ -663,24 +693,20 @@
 
     <script src="https://cdn.sheetjs.com/xlsx-0.20.1/package/dist/xlsx.full.min.js"></script>
     <script>
-        // Store parsed accounts for re-validation
+        // Store parsed accounts and raw content for re-validation
         let parsedAccounts = null;
+        let lastParsedContent = null;
         let allTicketTypes = [];
         let lastValidationResults = null;
 
-        // Badge types - these are convention badges
-        const BADGE_TYPES = [
-            '2026 Weekend Membership',
-            '2026 AB Ultra Membership',
-            '2026 Friday',
-            '2026 Saturday',
-            '2026 Sunday',
-            '2026 Weekend Group Membership',
-            "Dealer's (Included)",
-            "Artist's (Included)"
-        ];
+        // Parse newline-separated textarea into array of non-empty trimmed lines
+        function parseLinesFromTextarea(id) {
+            const el = document.getElementById(id);
+            if (!el) return [];
+            return (el.value || '').split('\n').map(s => s.trim()).filter(s => s.length > 0);
+        }
 
-        // Get current validation rules
+        // Get current validation rules (includes user-editable ticket rules)
         function getValidationRules() {
             const fraudulentTicketTypes = [];
             const checkboxes = document.querySelectorAll('#ticketTypeFilter input[type="checkbox"]:checked');
@@ -692,7 +718,11 @@
                 maxTickets: parseInt(document.getElementById('maxTickets').value) || 4,
                 checkTicketBadgeRatio: document.getElementById('checkTicketBadgeRatio').checked,
                 checkNoBadges: document.getElementById('checkNoBadges').checked,
-                fraudulentTicketTypes: fraudulentTicketTypes
+                fraudulentTicketTypes: fraudulentTicketTypes,
+                fraudulentTicketThreshold: parseInt(document.getElementById('fraudulentTicketThreshold').value) || 4,
+                validationOverrideTag: (document.getElementById('validationOverrideTag')?.value || '26YK-Validated').trim(),
+                badgeTypes: parseLinesFromTextarea('badgeTypes'),
+                fullAccessBadges: parseLinesFromTextarea('fullAccessBadges')
             };
         }
 
@@ -732,9 +762,13 @@
         // Make functions available globally
         window.selectAllTicketTypes = selectAllTicketTypes;
 
+        // Default badge types when form is empty
+        const DEFAULT_BADGE_TYPES = ['2026 Weekend Membership', '2026 AB Ultra Membership', '2026 Friday', '2026 Saturday', '2026 Sunday', '2026 Weekend Group Membership', "Dealer's (Included)", "Artist's (Included)"];
+
         // Check if a ticket name is a badge
-        function isBadge(ticketName) {
-            return BADGE_TYPES.some(badge => ticketName.includes(badge));
+        function isBadge(ticketName, badgeTypes) {
+            const types = badgeTypes && badgeTypes.length > 0 ? badgeTypes : DEFAULT_BADGE_TYPES;
+            return types.some(badge => ticketName.includes(badge));
         }
 
         // Parse CSV content
@@ -766,7 +800,10 @@
             // Parse data rows and collect ticket types
             const accounts = {};
             const ticketTypeSet = new Set();
-            
+            const rules = getValidationRules();
+            const badgeTypes = rules.badgeTypes;
+            const validationOverrideTag = rules.validationOverrideTag;
+
             for (let i = 1; i < lines.length; i++) {
                 const row = parseCSVLine(lines[i]);
                 if (row.length < Math.max(purchaserEmailIndex, ticketNameIndex) + 1) {
@@ -782,7 +819,7 @@
                 }
 
                 // Collect unique ticket types (excluding badges)
-                if (!isBadge(ticketName)) {
+                if (!isBadge(ticketName, badgeTypes)) {
                     ticketTypeSet.add(ticketName);
                 }
 
@@ -798,10 +835,10 @@
                     };
                 }
 
-                // Check for 26YK-Validated tag (overrides other validation)
-                if (tagsIndex >= 0 && row.length > tagsIndex) {
+                // Check for validation override tag (overrides other validation)
+                if (tagsIndex >= 0 && row.length > tagsIndex && validationOverrideTag) {
                     const tags = (row[tagsIndex] || '').trim();
-                    if (tags.includes('26YK-Validated')) {
+                    if (tags.includes(validationOverrideTag)) {
                         accounts[email].has26YKValidated = true;
                     }
                 }
@@ -815,7 +852,7 @@
                     name: ticketName
                 };
 
-                if (isBadge(ticketName)) {
+                if (isBadge(ticketName, badgeTypes)) {
                     accounts[email].badges++;
                     accounts[email].badgeItems.push(item);
                 } else {
@@ -860,13 +897,14 @@
             return result;
         }
 
-        // Weekend/Ultra badges - full access, do not trigger Kanno concern
-        const FULL_ACCESS_BADGES = ['2026 Weekend Membership', '2026 AB Ultra Membership', '2026 Friday', '2026 Weekend Group Membership'];
+        // Default full access badges when form is empty
+        const DEFAULT_FULL_ACCESS_BADGES = ['2026 Weekend Membership', '2026 AB Ultra Membership', '2026 Friday', '2026 Weekend Group Membership'];
 
         // Check if account has non-weekend non-ultra badge (day pass, dealer, artist, etc.)
-        function hasNonWeekendNonUltraBadge(account) {
+        function hasNonWeekendNonUltraBadge(account, fullAccessBadges) {
+            const badges = fullAccessBadges && fullAccessBadges.length > 0 ? fullAccessBadges : DEFAULT_FULL_ACCESS_BADGES;
             return (account.badgeItems || []).some(b =>
-                !FULL_ACCESS_BADGES.some(full => b.name.includes(full))
+                !badges.some(full => b.name.includes(full))
             );
         }
 
@@ -889,7 +927,7 @@
                 const issues = [];
 
                 // Rule 0: Non-weekend non-ultra badge + Kanno ticket = concern (purple, top of list)
-                if (hasNonWeekendNonUltraBadge(account) && hasKannoTicket(account)) {
+                if (hasNonWeekendNonUltraBadge(account, rules.fullAccessBadges) && hasKannoTicket(account)) {
                     issues.push({
                         type: 'concern',
                         message: 'Account has a non-weekend/non-ultra badge with a Yoko Kanno Concert ticket'
@@ -904,14 +942,15 @@
                     });
                 }
 
-                // Rule 2: Has more than 4 tickets of fraudulent ticket types = fraudulent
+                // Rule 2: Has more than threshold tickets of fraudulent ticket types = fraudulent
+                const threshold = rules.fraudulentTicketThreshold;
                 if (rules.fraudulentTicketTypes && rules.fraudulentTicketTypes.length > 0) {
                     const ticketCountByType = {};
-                    (account.ticketNames || []).filter(name => !isBadge(name)).forEach(name => {
+                    (account.ticketNames || []).filter(name => !isBadge(name, rules.badgeTypes)).forEach(name => {
                         ticketCountByType[name] = (ticketCountByType[name] || 0) + 1;
                     });
                     const fraudulentTypesOverThreshold = rules.fraudulentTicketTypes.filter(fraudType =>
-                        (ticketCountByType[fraudType] || 0) > 4
+                        (ticketCountByType[fraudType] || 0) > threshold
                     );
 
                     if (fraudulentTypesOverThreshold.length > 0) {
@@ -920,7 +959,7 @@
                         );
                         issues.push({
                             type: 'fraudulent',
-                            message: `Account has more than 4 tickets of fraudulent types: ${details.join(', ')}`
+                            message: `Account has more than ${threshold} tickets of fraudulent types: ${details.join(', ')}`
                         });
                     }
                 }
@@ -944,7 +983,7 @@
                 const accountData = {
                     ...account,
                     issues: account.has26YKValidated
-                        ? [{ type: 'valid', message: 'Validated via 26YK-Validated tag (other checks overridden)' }]
+                        ? [{ type: 'valid', message: `Validated via ${rules.validationOverrideTag} tag (other checks overridden)` }]
                         : issues
                 };
 
@@ -1186,6 +1225,7 @@
             reader.onload = function(e) {
                 try {
                     const content = e.target.result;
+                    lastParsedContent = content;
                     parsedAccounts = parseCSV(content);
                     const validationResults = validateAccounts(parsedAccounts);
                     displayResults(validationResults);
@@ -1196,6 +1236,7 @@
                     document.getElementById('error').style.display = 'block';
                     document.getElementById('results').classList.remove('show');
                     parsedAccounts = null;
+                    lastParsedContent = null;
                     document.getElementById('revalidateButton').style.display = 'none';
                 }
             };
@@ -1204,6 +1245,7 @@
                 document.getElementById('error').textContent = 'Error reading file';
                 document.getElementById('error').style.display = 'block';
                 parsedAccounts = null;
+                lastParsedContent = null;
                 document.getElementById('revalidateButton').style.display = 'none';
             };
 
@@ -1212,7 +1254,8 @@
 
         // Re-validate with current rules
         function revalidate() {
-            if (parsedAccounts) {
+            if (lastParsedContent) {
+                parsedAccounts = parseCSV(lastParsedContent);
                 const validationResults = validateAccounts(parsedAccounts);
                 displayResults(validationResults);
             }

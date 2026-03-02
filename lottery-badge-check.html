@@ -1,0 +1,729 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Lottery Badge Checker</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 20px;
+        }
+
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            background: white;
+            border-radius: 12px;
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+            padding: 40px;
+        }
+
+        h1 {
+            color: #333;
+            margin-bottom: 10px;
+            font-size: 2.5em;
+        }
+
+        .subtitle {
+            color: #666;
+            margin-bottom: 30px;
+            font-size: 1.1em;
+        }
+
+        .upload-row {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 20px;
+            margin-bottom: 20px;
+        }
+
+        @media (max-width: 768px) {
+            .upload-row {
+                grid-template-columns: 1fr;
+            }
+        }
+
+        .upload-area {
+            border: 3px dashed #667eea;
+            border-radius: 8px;
+            padding: 24px;
+            text-align: center;
+            background: #f8f9ff;
+            cursor: pointer;
+            transition: all 0.3s ease;
+        }
+
+        .upload-area:hover {
+            border-color: #764ba2;
+            background: #f0f2ff;
+        }
+
+        .upload-area.dragover {
+            border-color: #764ba2;
+            background: #e8ebff;
+        }
+
+        .upload-area.loaded {
+            border-color: #27ae60;
+            background: #f0fff4;
+        }
+
+        .upload-area h3 {
+            font-size: 1em;
+            color: #333;
+            margin-bottom: 6px;
+        }
+
+        .upload-area .file-name {
+            font-size: 0.85em;
+            color: #27ae60;
+            margin-top: 8px;
+            word-break: break-all;
+        }
+
+        .upload-area .file-name.empty {
+            color: #999;
+        }
+
+        input[type="file"] {
+            display: none;
+        }
+
+        .upload-button {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 10px 20px;
+            border: none;
+            border-radius: 6px;
+            font-size: 0.9em;
+            cursor: pointer;
+            margin-top: 10px;
+            display: inline-block;
+        }
+
+        .upload-button:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 5px 15px rgba(102, 126, 234, 0.4);
+        }
+
+        .run-button {
+            background: linear-gradient(135deg, #27ae60 0%, #2ecc71 100%);
+            color: white;
+            padding: 12px 30px;
+            border: none;
+            border-radius: 6px;
+            font-size: 1em;
+            cursor: pointer;
+            margin: 20px 0;
+            display: block;
+        }
+
+        .run-button:hover:not(:disabled) {
+            transform: translateY(-2px);
+            box-shadow: 0 5px 15px rgba(39, 174, 96, 0.4);
+        }
+
+        .run-button:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+        }
+
+        .results {
+            margin-top: 30px;
+            display: none;
+        }
+
+        .results.show {
+            display: block;
+        }
+
+        .summary {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 20px;
+            margin-bottom: 30px;
+        }
+
+        .summary-card {
+            background: #f8f9ff;
+            padding: 20px;
+            border-radius: 8px;
+            border-left: 4px solid #667eea;
+        }
+
+        .summary-card.fraudulent {
+            border-left-color: #e74c3c;
+            background: #fff5f5;
+        }
+
+        .summary-card.valid {
+            border-left-color: #27ae60;
+            background: #f0fff4;
+        }
+
+        .summary-card h3 {
+            font-size: 2em;
+            color: #333;
+            margin-bottom: 5px;
+        }
+
+        .summary-card p {
+            color: #666;
+            font-size: 0.9em;
+        }
+
+        .account-list {
+            margin-top: 20px;
+        }
+
+        .account-item {
+            background: white;
+            border: 1px solid #e0e0e0;
+            border-radius: 8px;
+            padding: 20px;
+            margin-bottom: 15px;
+            transition: all 0.2s ease;
+            border-left: 4px solid #e74c3c;
+            background: #fff5f5;
+        }
+
+        .account-item:hover {
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+        }
+
+        .account-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 8px;
+        }
+
+        .account-email {
+            font-weight: 600;
+            color: #333;
+            font-size: 1.1em;
+        }
+
+        .account-name {
+            color: #666;
+            font-size: 0.9em;
+            margin-top: 4px;
+        }
+
+        .account-title {
+            color: #666;
+            font-size: 0.85em;
+            margin-top: 4px;
+        }
+
+        .account-badge {
+            display: inline-block;
+            padding: 4px 12px;
+            border-radius: 12px;
+            font-size: 0.85em;
+            font-weight: 600;
+            background: #e74c3c;
+            color: white;
+        }
+
+        .settings-panel {
+            background: #f8f9ff;
+            border-radius: 8px;
+            padding: 12px 16px;
+            margin-bottom: 20px;
+            border: 2px solid #e0e0e0;
+        }
+
+        .settings-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            cursor: pointer;
+            user-select: none;
+        }
+
+        .settings-header h2 {
+            color: #333;
+            font-size: 1.1em;
+            margin: 0;
+        }
+
+        .settings-toggle {
+            font-size: 1.2em;
+            color: #667eea;
+            transition: transform 0.3s ease;
+        }
+
+        .settings-toggle.collapsed {
+            transform: rotate(-90deg);
+        }
+
+        .settings-content {
+            margin-top: 12px;
+            display: block;
+        }
+
+        .settings-content.hidden {
+            display: none;
+        }
+
+        .setting-group {
+            margin-bottom: 12px;
+            padding: 10px 12px;
+            background: white;
+            border-radius: 4px;
+            border-left: 2px solid #667eea;
+        }
+
+        .setting-group label {
+            display: block;
+            margin-bottom: 5px;
+            font-weight: 600;
+            color: #333;
+            font-size: 0.9em;
+        }
+
+        .setting-description {
+            color: #666;
+            font-size: 0.8em;
+            margin-top: 4px;
+            font-style: italic;
+            line-height: 1.3;
+        }
+
+        .report-section {
+            margin-top: 40px;
+            padding: 24px;
+            background: #f8f9ff;
+            border-radius: 8px;
+            border: 1px solid #e0e4f0;
+        }
+
+        .report-section h3 {
+            color: #333;
+            margin-bottom: 8px;
+            font-size: 1.3em;
+        }
+
+        .report-description {
+            color: #666;
+            margin-bottom: 16px;
+            font-size: 0.95em;
+        }
+
+        .report-buttons {
+            display: flex;
+            gap: 12px;
+            flex-wrap: wrap;
+        }
+
+        .export-button {
+            padding: 10px 20px;
+            border: none;
+            border-radius: 6px;
+            font-size: 0.95em;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        .export-csv {
+            background: #28a745;
+            color: white;
+        }
+
+        .export-csv:hover {
+            background: #218838;
+            transform: translateY(-1px);
+        }
+
+        .export-excel {
+            background: #217346;
+            color: white;
+        }
+
+        .export-excel:hover {
+            background: #1a5c38;
+            transform: translateY(-1px);
+        }
+
+        .error {
+            background: #fff5f5;
+            border: 1px solid #e74c3c;
+            border-radius: 8px;
+            padding: 15px;
+            color: #e74c3c;
+            margin-top: 20px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Lottery Badge Checker</h1>
+        <p class="subtitle">Identify lottery winners who have not purchased a badge</p>
+
+        <div class="settings-panel">
+            <div class="settings-header" id="settingsHeader">
+                <h2>Badge Types</h2>
+                <span class="settings-toggle" id="settingsToggle">▼</span>
+            </div>
+            <div class="settings-content" id="settingsContent">
+                <div class="setting-group">
+                    <label for="badgeTypes">Badge types (one per line):</label>
+                    <textarea id="badgeTypes" rows="6" style="width: 100%; font-family: monospace; font-size: 0.9em;">2026 Weekend Membership
+2026 AB Ultra Membership
+2026 Friday
+2026 Saturday
+2026 Sunday
+2026 Weekend Group Membership
+Dealer's (Included)
+Artist's (Included)</textarea>
+                    <div class="setting-description">Ticket names containing these strings are counted as badges in the purchase data</div>
+                </div>
+            </div>
+        </div>
+
+        <div class="upload-row">
+            <div class="upload-area" id="uploadArea1" data-input="fileInput1">
+                <h3>1. Ticket/Purchase Data (2026.csv)</h3>
+                <p style="font-size: 0.9em; color: #666; margin: 8px 0;">Purchaser email, Ticket name columns</p>
+                <input type="file" id="fileInput1" accept=".csv" />
+                <button type="button" class="upload-button">Choose File</button>
+                <div class="file-name empty" id="fileName1">No file selected</div>
+            </div>
+            <div class="upload-area" id="uploadArea2" data-input="fileInput2">
+                <h3>2. Lottery List (lotterylist.csv)</h3>
+                <p style="font-size: 0.9em; color: #666; margin: 8px 0;">Email column required</p>
+                <input type="file" id="fileInput2" accept=".csv" />
+                <button type="button" class="upload-button">Choose File</button>
+                <div class="file-name empty" id="fileName2">No file selected</div>
+            </div>
+        </div>
+
+        <button type="button" class="run-button" id="runButton" disabled>Run Check</button>
+
+        <div id="results" class="results">
+            <div class="summary" id="summary"></div>
+            <div class="account-list" id="accountList"></div>
+            <div class="report-section" id="reportSection">
+                <h3>Export Report</h3>
+                <p class="report-description">Download lottery winners without badges</p>
+                <div class="report-buttons">
+                    <button type="button" class="export-button export-csv" id="exportCsvBtn">Download CSV</button>
+                    <button type="button" class="export-button export-excel" id="exportExcelBtn">Download Excel</button>
+                </div>
+            </div>
+        </div>
+
+        <div id="error" class="error" style="display: none;"></div>
+    </div>
+
+    <script src="https://cdn.sheetjs.com/xlsx-0.20.1/package/dist/xlsx.full.min.js"></script>
+    <script>
+        let purchaseDataContent = null;
+        let lotteryDataContent = null;
+        let lastCheckResults = null;
+
+        function parseLinesFromTextarea(id) {
+            const el = document.getElementById(id);
+            if (!el) return [];
+            return (el.value || '').split('\n').map(s => s.trim()).filter(s => s.length > 0);
+        }
+
+        const DEFAULT_BADGE_TYPES = ['2026 Weekend Membership', '2026 AB Ultra Membership', '2026 Friday', '2026 Saturday', '2026 Sunday', '2026 Weekend Group Membership', "Dealer's (Included)", "Artist's (Included)"];
+
+        function getBadgeTypes() {
+            const types = parseLinesFromTextarea('badgeTypes');
+            return types.length > 0 ? types : DEFAULT_BADGE_TYPES;
+        }
+
+        function isBadge(ticketName, badgeTypes) {
+            const types = badgeTypes && badgeTypes.length > 0 ? badgeTypes : DEFAULT_BADGE_TYPES;
+            return types.some(badge => ticketName.includes(badge));
+        }
+
+        function parseCSVLine(line) {
+            const result = [];
+            let current = '';
+            let inQuotes = false;
+            for (let i = 0; i < line.length; i++) {
+                const char = line[i];
+                if (char === '"') {
+                    if (inQuotes && line[i + 1] === '"') {
+                        current += '"';
+                        i++;
+                    } else {
+                        inQuotes = !inQuotes;
+                    }
+                } else if (char === ',' && !inQuotes) {
+                    result.push(current.trim());
+                    current = '';
+                } else {
+                    current += char;
+                }
+            }
+            result.push(current.trim());
+            return result;
+        }
+
+        function parsePurchaseData(content) {
+            const lines = content.split('\n').filter(line => line.trim());
+            if (lines.length < 2) throw new Error('Purchase CSV must have header and at least one row');
+            const header = parseCSVLine(lines[0]).map(col => col.replace(/^"|"$/g, '').trim());
+            const purchaserEmailIndex = header.findIndex(col =>
+                col.toLowerCase().includes('purchaser') && col.toLowerCase().includes('email')
+            );
+            const ticketNameIndex = header.findIndex(col =>
+                col.toLowerCase().includes('ticket') && col.toLowerCase().includes('name')
+            );
+            if (purchaserEmailIndex === -1 || ticketNameIndex === -1) {
+                throw new Error('Purchase CSV must contain "Purchaser email" and "Ticket name" columns');
+            }
+            const badgeTypes = getBadgeTypes();
+            const badgePurchaserEmails = new Set();
+            for (let i = 1; i < lines.length; i++) {
+                const row = parseCSVLine(lines[i]);
+                if (row.length < Math.max(purchaserEmailIndex, ticketNameIndex) + 1) continue;
+                const email = row[purchaserEmailIndex].trim();
+                const ticketName = row[ticketNameIndex].trim();
+                if (!email || !ticketName) continue;
+                if (isBadge(ticketName, badgeTypes)) {
+                    badgePurchaserEmails.add(email.toLowerCase().trim());
+                }
+            }
+            return badgePurchaserEmails;
+        }
+
+        function parseLotteryList(content) {
+            const lines = content.split('\n').filter(line => line.trim());
+            if (lines.length < 2) throw new Error('Lottery CSV must have header and at least one row');
+            const header = parseCSVLine(lines[0]).map(col => col.replace(/^"|"$/g, '').trim());
+            const emailIndex = header.findIndex(col => col.toLowerCase().trim() === 'email');
+            const firstNameIndex = header.findIndex(col => col.toLowerCase().includes('first') && col.toLowerCase().includes('name'));
+            const lastNameIndex = header.findIndex(col => col.toLowerCase().includes('last') && col.toLowerCase().includes('name'));
+            const titleIndex = header.findIndex(col => col.toLowerCase().trim() === 'title');
+            if (emailIndex === -1) throw new Error('Lottery CSV must contain "Email" column');
+            const winnersByEmail = {};
+            for (let i = 1; i < lines.length; i++) {
+                const row = parseCSVLine(lines[i]);
+                if (row.length <= emailIndex) continue;
+                const email = (row[emailIndex] || '').trim();
+                if (!email) continue;
+                const emailKey = email.toLowerCase();
+                const firstName = firstNameIndex >= 0 && row[firstNameIndex] ? row[firstNameIndex].trim() : '';
+                const lastName = lastNameIndex >= 0 && row[lastNameIndex] ? row[lastNameIndex].trim() : '';
+                const title = titleIndex >= 0 && row[titleIndex] ? row[titleIndex].trim() : '';
+                if (!winnersByEmail[emailKey]) {
+                    winnersByEmail[emailKey] = { email, firstName, lastName, titles: [] };
+                }
+                if (title && !winnersByEmail[emailKey].titles.includes(title)) {
+                    winnersByEmail[emailKey].titles.push(title);
+                }
+            }
+            return Object.values(winnersByEmail);
+        }
+
+        function runCheck() {
+            document.getElementById('error').style.display = 'none';
+            if (!purchaseDataContent || !lotteryDataContent) {
+                document.getElementById('error').textContent = 'Please upload both files first.';
+                document.getElementById('error').style.display = 'block';
+                return;
+            }
+            try {
+                const badgePurchaserEmails = parsePurchaseData(purchaseDataContent);
+                const lotteryWinners = parseLotteryList(lotteryDataContent);
+                const winnersWithoutBadge = lotteryWinners.filter(w =>
+                    !badgePurchaserEmails.has(w.email.toLowerCase().trim())
+                );
+                const winnersWithBadge = lotteryWinners.filter(w =>
+                    badgePurchaserEmails.has(w.email.toLowerCase().trim())
+                );
+                lastCheckResults = { winnersWithoutBadge, winnersWithBadge };
+                displayResults(lastCheckResults);
+            } catch (err) {
+                document.getElementById('error').textContent = 'Error: ' + err.message;
+                document.getElementById('error').style.display = 'block';
+            }
+        }
+
+        function displayResults(results) {
+            const { winnersWithoutBadge, winnersWithBadge } = results;
+            document.getElementById('summary').innerHTML = `
+                <div class="summary-card fraudulent">
+                    <h3>${winnersWithoutBadge.length}</h3>
+                    <p>Lottery Winners Without Badge</p>
+                </div>
+                <div class="summary-card valid">
+                    <h3>${winnersWithBadge.length}</h3>
+                    <p>Lottery Winners With Badge</p>
+                </div>
+                <div class="summary-card">
+                    <h3>${winnersWithoutBadge.length + winnersWithBadge.length}</h3>
+                    <p>Total Lottery Winners</p>
+                </div>
+            `;
+            const accountListHTML = winnersWithoutBadge.map(w => {
+                const titlesStr = (w.titles || []).map(t => escapeHtml(t)).join('<br>');
+                return `
+                <div class="account-item">
+                    <div class="account-header">
+                        <span class="account-email">${escapeHtml(w.email)}</span>
+                        <span class="account-badge">NO BADGE</span>
+                    </div>
+                    <div class="account-name">${escapeHtml(w.firstName)} ${escapeHtml(w.lastName)}</div>
+                    ${titlesStr ? `<div class="account-title">${titlesStr}</div>` : ''}
+                </div>
+            `;
+            }).join('');
+            document.getElementById('accountList').innerHTML = accountListHTML;
+            document.getElementById('results').classList.add('show');
+        }
+
+        function escapeHtml(str) {
+            if (!str) return '';
+            const div = document.createElement('div');
+            div.textContent = str;
+            return div.innerHTML;
+        }
+
+        function buildReportData() {
+            if (!lastCheckResults) return [];
+            return lastCheckResults.winnersWithoutBadge.map(w => ({
+                Email: w.email,
+                'First name': w.firstName,
+                'Last name': w.lastName,
+                'Lottery ticket types': (w.titles || []).join('\n'),
+                Status: 'No badge purchased'
+            }));
+        }
+
+        function escapeCSVField(val) {
+            if (val == null) return '';
+            const str = String(val);
+            if (str.includes(',') || str.includes('"') || str.includes('\n')) {
+                return '"' + str.replace(/"/g, '""') + '"';
+            }
+            return str;
+        }
+
+        function exportReportCSV() {
+            const rows = buildReportData();
+            if (rows.length === 0) {
+                alert('No data to export. Please run the check first.');
+                return;
+            }
+            const headers = Object.keys(rows[0]);
+            const csvLines = [headers.map(escapeCSVField).join(',')];
+            rows.forEach(row => {
+                csvLines.push(headers.map(h => escapeCSVField(row[h])).join(','));
+            });
+            const csv = csvLines.join('\n');
+            const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `lottery-winners-without-badge-${new Date().toISOString().slice(0, 10)}.csv`;
+            a.click();
+            URL.revokeObjectURL(url);
+        }
+
+        function exportReportExcel() {
+            const rows = buildReportData();
+            if (rows.length === 0) {
+                alert('No data to export. Please run the check first.');
+                return;
+            }
+            if (typeof XLSX === 'undefined') {
+                alert('Excel export requires the SheetJS library. Please check your connection.');
+                return;
+            }
+            const ws = XLSX.utils.json_to_sheet(rows);
+            const wb = XLSX.utils.book_new();
+            XLSX.utils.book_append_sheet(wb, ws, 'Winners Without Badge');
+            XLSX.writeFile(wb, `lottery-winners-without-badge-${new Date().toISOString().slice(0, 10)}.xlsx`);
+        }
+
+        function setupFileUpload(inputId, areaId, fileNameId, store) {
+            const input = document.getElementById(inputId);
+            const area = document.getElementById(areaId);
+            const fileNameEl = document.getElementById(fileNameId);
+            const button = area.querySelector('.upload-button');
+
+            const handleFile = (file) => {
+                if (!file || !file.name.endsWith('.csv')) {
+                    alert('Please select a CSV file.');
+                    return;
+                }
+                const reader = new FileReader();
+                reader.onload = (e) => {
+                    store(e.target.result);
+                    fileNameEl.textContent = file.name;
+                    fileNameEl.classList.remove('empty');
+                    area.classList.add('loaded');
+                    updateRunButton();
+                };
+                reader.readAsText(file);
+            };
+
+            button.addEventListener('click', (e) => {
+                e.stopPropagation();
+                input.click();
+            });
+            area.addEventListener('click', (e) => {
+                if (e.target !== button && !e.target.closest('.upload-button')) {
+                    input.click();
+                }
+            });
+            if (input) {
+                input.addEventListener('change', (e) => {
+                    const file = e.target.files[0];
+                    if (file) handleFile(file);
+                });
+            }
+            area.addEventListener('dragover', (e) => {
+                e.preventDefault();
+                area.classList.add('dragover');
+            });
+            area.addEventListener('dragleave', () => {
+                area.classList.remove('dragover');
+            });
+            area.addEventListener('drop', (e) => {
+                e.preventDefault();
+                area.classList.remove('dragover');
+                const file = e.dataTransfer.files[0];
+                if (file) handleFile(file);
+            });
+        }
+
+        function updateRunButton() {
+            document.getElementById('runButton').disabled = !(purchaseDataContent && lotteryDataContent);
+        }
+
+        document.getElementById('runButton').addEventListener('click', runCheck);
+        document.getElementById('exportCsvBtn').addEventListener('click', exportReportCSV);
+        document.getElementById('exportExcelBtn').addEventListener('click', exportReportExcel);
+
+        setupFileUpload('fileInput1', 'uploadArea1', 'fileName1', (c) => { purchaseDataContent = c; });
+        setupFileUpload('fileInput2', 'uploadArea2', 'fileName2', (c) => { lotteryDataContent = c; });
+
+        document.getElementById('settingsHeader').addEventListener('click', () => {
+            const content = document.getElementById('settingsContent');
+            const toggle = document.getElementById('settingsToggle');
+            content.classList.toggle('hidden');
+            toggle.classList.toggle('collapsed');
+        });
+    </script>
+</body>
+</html>
