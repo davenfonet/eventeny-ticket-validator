@@ -300,6 +300,13 @@
             line-height: 1.3;
         }
 
+        .setting-group input[type="checkbox"] {
+            width: 18px;
+            height: 18px;
+            cursor: pointer;
+            flex-shrink: 0;
+        }
+
         .report-section {
             margin-top: 40px;
             padding: 24px;
@@ -395,12 +402,27 @@ Artist's (Included)</textarea>
         </div>
 
         <div class="upload-row">
-            <div class="upload-area" id="uploadArea1" data-input="fileInput1">
-                <h3>1. Ticket/Purchase Data (2026.csv)</h3>
-                <p style="font-size: 0.9em; color: #666; margin: 8px 0;">Purchaser email, Ticket name columns</p>
-                <input type="file" id="fileInput1" accept=".csv" />
-                <button type="button" class="upload-button">Choose File</button>
-                <div class="file-name empty" id="fileName1">No file selected</div>
+            <div style="display: flex; flex-direction: column; gap: 16px;">
+                <div class="upload-area" id="uploadArea1" data-input="fileInput1">
+                    <h3>1. Ticket/Purchase Data (2026.csv)</h3>
+                    <p style="font-size: 0.9em; color: #666; margin: 8px 0;">Purchaser email, Attendee email, Ticket name columns</p>
+                    <input type="file" id="fileInput1" accept=".csv" />
+                    <button type="button" class="upload-button">Choose File</button>
+                    <div class="file-name empty" id="fileName1">No file selected</div>
+                </div>
+                <div class="email-checkboxes-box" style="padding: 16px; background: #f8f9ff; border-radius: 8px; border: 1px solid #e0e4f0;">
+                    <div style="display: flex; flex-direction: column; gap: 8px;">
+                        <label style="display: flex; align-items: center; gap: 8px; margin: 0; font-size: 0.95em; cursor: pointer;">
+                            <input type="checkbox" id="checkPurchaserEmail" />
+                            Check Purchaser email
+                        </label>
+                        <label style="display: flex; align-items: center; gap: 8px; margin: 0; font-size: 0.95em; cursor: pointer;">
+                            <input type="checkbox" id="checkAttendeeEmail" checked />
+                            Check Attendee email
+                        </label>
+                    </div>
+                    <div class="setting-description" style="margin-top: 8px;">Match lottery winners against emails in these columns (at least one must be selected)</div>
+                </div>
             </div>
             <div class="upload-area" id="uploadArea2" data-input="fileInput2">
                 <h3>2. Lottery List (lotterylist.csv)</h3>
@@ -484,25 +506,43 @@ Artist's (Included)</textarea>
             const purchaserEmailIndex = header.findIndex(col =>
                 col.toLowerCase().includes('purchaser') && col.toLowerCase().includes('email')
             );
+            const attendeeEmailIndex = header.findIndex(col =>
+                col.toLowerCase().includes('attendee') && col.toLowerCase().includes('email')
+            );
             const ticketNameIndex = header.findIndex(col =>
                 col.toLowerCase().includes('ticket') && col.toLowerCase().includes('name')
             );
-            if (purchaserEmailIndex === -1 || ticketNameIndex === -1) {
-                throw new Error('Purchase CSV must contain "Purchaser email" and "Ticket name" columns');
+            if (ticketNameIndex === -1) {
+                throw new Error('Purchase CSV must contain "Ticket name" column');
+            }
+            const checkPurchaser = document.getElementById('checkPurchaserEmail')?.checked ?? false;
+            const checkAttendee = document.getElementById('checkAttendeeEmail')?.checked ?? false;
+            if (!checkPurchaser && !checkAttendee) {
+                throw new Error('Select at least one: Check Purchaser email or Check Attendee email');
+            }
+            if (checkPurchaser && purchaserEmailIndex === -1) {
+                throw new Error('Purchase CSV must contain "Purchaser email" column when that option is selected');
+            }
+            if (checkAttendee && attendeeEmailIndex === -1) {
+                throw new Error('Purchase CSV must contain "Attendee email" column when that option is selected');
             }
             const badgeTypes = getBadgeTypes();
-            const badgePurchaserEmails = new Set();
+            const badgeEmails = new Set();
             for (let i = 1; i < lines.length; i++) {
                 const row = parseCSVLine(lines[i]);
-                if (row.length < Math.max(purchaserEmailIndex, ticketNameIndex) + 1) continue;
-                const email = row[purchaserEmailIndex].trim();
+                if (row.length <= ticketNameIndex) continue;
                 const ticketName = row[ticketNameIndex].trim();
-                if (!email || !ticketName) continue;
-                if (isBadge(ticketName, badgeTypes)) {
-                    badgePurchaserEmails.add(email.toLowerCase().trim());
+                if (!ticketName || !isBadge(ticketName, badgeTypes)) continue;
+                if (checkPurchaser && purchaserEmailIndex >= 0 && row.length > purchaserEmailIndex) {
+                    const email = row[purchaserEmailIndex].trim();
+                    if (email) badgeEmails.add(email.toLowerCase().trim());
+                }
+                if (checkAttendee && attendeeEmailIndex >= 0 && row.length > attendeeEmailIndex) {
+                    const email = row[attendeeEmailIndex].trim();
+                    if (email) badgeEmails.add(email.toLowerCase().trim());
                 }
             }
-            return badgePurchaserEmails;
+            return badgeEmails;
         }
 
         function parseLotteryList(content) {
@@ -542,13 +582,13 @@ Artist's (Included)</textarea>
                 return;
             }
             try {
-                const badgePurchaserEmails = parsePurchaseData(purchaseDataContent);
+                const badgeEmails = parsePurchaseData(purchaseDataContent);
                 const lotteryWinners = parseLotteryList(lotteryDataContent);
                 const winnersWithoutBadge = lotteryWinners.filter(w =>
-                    !badgePurchaserEmails.has(w.email.toLowerCase().trim())
+                    !badgeEmails.has(w.email.toLowerCase().trim())
                 );
                 const winnersWithBadge = lotteryWinners.filter(w =>
-                    badgePurchaserEmails.has(w.email.toLowerCase().trim())
+                    badgeEmails.has(w.email.toLowerCase().trim())
                 );
                 lastCheckResults = { winnersWithoutBadge, winnersWithBadge };
                 displayResults(lastCheckResults);
