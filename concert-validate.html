@@ -637,10 +637,17 @@
                 </div>
                 <div class="setting-group">
                     <div class="checkbox-group">
+                        <input type="checkbox" id="checkPurchaseEmail" checked />
+                        <label for="checkPurchaseEmail" style="margin: 0;">Include Purchase / Purchaser email in account aggregation</label>
+                    </div>
+                    <div class="setting-description">Uses the Purchaser email or Purchase email column. At least one of this option and Attendee email must be enabled</div>
+                </div>
+                <div class="setting-group">
+                    <div class="checkbox-group">
                         <input type="checkbox" id="checkAttendeeEmail" checked />
                         <label for="checkAttendeeEmail" style="margin: 0;">Include Attendee email in account aggregation</label>
                     </div>
-                    <div class="setting-description">When checked, tickets and badges are also counted for the attendee's account (in addition to the purchaser)</div>
+                    <div class="setting-description">When checked, tickets and badges are also counted for the attendee's account (when it differs from the purchase email, or when only attendee aggregation is enabled)</div>
                 </div>
                 <div class="setting-group">
                     <label for="badgeTypes">Badge types (one per line):</label>
@@ -728,6 +735,7 @@ Artist's (Included)</textarea>
                 fraudulentTicketTypes: fraudulentTicketTypes,
                 fraudulentTicketThreshold: parseInt(document.getElementById('fraudulentTicketThreshold').value) || 4,
                 validationOverrideTag: (document.getElementById('validationOverrideTag')?.value || '26YK-Validated').trim(),
+                checkPurchaseEmail: document.getElementById('checkPurchaseEmail')?.checked ?? true,
                 checkAttendeeEmail: document.getElementById('checkAttendeeEmail')?.checked ?? true,
                 badgeTypes: parseLinesFromTextarea('badgeTypes'),
                 fullAccessBadges: parseLinesFromTextarea('fullAccessBadges')
@@ -779,6 +787,19 @@ Artist's (Included)</textarea>
             return types.some(badge => ticketName.includes(badge));
         }
 
+        // Purchaser email column, or Purchase email (Eventeny-style) when purchaser is not named that way
+        function findPurchaseEmailColumnIndex(header) {
+            let idx = header.findIndex(col => {
+                const h = col.toLowerCase();
+                return h.includes('purchaser') && h.includes('email');
+            });
+            if (idx >= 0) return idx;
+            return header.findIndex(col => {
+                const h = col.toLowerCase();
+                return h.includes('purchase') && h.includes('email') && !h.includes('purchaser');
+            });
+        }
+
         // Parse CSV content
         function parseCSV(content) {
             const lines = content.split('\n').filter(line => line.trim());
@@ -788,9 +809,7 @@ Artist's (Included)</textarea>
 
             // Parse header
             const header = parseCSVLine(lines[0]).map(col => col.replace(/^"|"$/g, '').trim());
-            const purchaserEmailIndex = header.findIndex(col => 
-                col.toLowerCase().includes('purchaser') && col.toLowerCase().includes('email')
-            );
+            const purchaseEmailIndex = findPurchaseEmailColumnIndex(header);
             const attendeeEmailIndex = header.findIndex(col => 
                 col.toLowerCase().includes('attendee') && col.toLowerCase().includes('email')
             );
@@ -804,12 +823,23 @@ Artist's (Included)</textarea>
                 col.toLowerCase().trim() === 'tags'
             );
 
-            if (purchaserEmailIndex === -1 || ticketNameIndex === -1) {
-                throw new Error('CSV must contain "Purchaser email" and "Ticket name" columns');
+            if (ticketNameIndex === -1) {
+                throw new Error('CSV must contain a "Ticket name" column');
             }
 
             const rules = getValidationRules();
+            const checkPurchase = rules.checkPurchaseEmail;
             const checkAttendee = rules.checkAttendeeEmail && attendeeEmailIndex >= 0;
+
+            if (!checkPurchase && !checkAttendee) {
+                throw new Error('Enable at least one: Purchase / Purchaser email or Attendee email in account aggregation');
+            }
+            if (checkPurchase && purchaseEmailIndex === -1) {
+                throw new Error('CSV must contain a "Purchaser email" or "Purchase email" column when purchase aggregation is enabled');
+            }
+            if (rules.checkAttendeeEmail && attendeeEmailIndex === -1) {
+                throw new Error('CSV must contain an "Attendee email" column when attendee aggregation is enabled');
+            }
 
             // Parse data rows and collect ticket types
             const accounts = {};
@@ -845,18 +875,35 @@ Artist's (Included)</textarea>
                 }
             }
 
+            let maxColIdx = ticketNameIndex;
+            if (checkPurchase && purchaseEmailIndex >= 0) maxColIdx = Math.max(maxColIdx, purchaseEmailIndex);
+            if (checkAttendee && attendeeEmailIndex >= 0) maxColIdx = Math.max(maxColIdx, attendeeEmailIndex);
+            if (idIndex >= 0) maxColIdx = Math.max(maxColIdx, idIndex);
+            if (tagsIndex >= 0) maxColIdx = Math.max(maxColIdx, tagsIndex);
+
+            function applyOverrideTag(acc, row) {
+                if (tagsIndex >= 0 && row.length > tagsIndex && validationOverrideTag) {
+                    const tags = (row[tagsIndex] || '').trim();
+                    if (tags.includes(validationOverrideTag)) {
+                        acc.has26YKValidated = true;
+                    }
+                }
+            }
+
             for (let i = 1; i < lines.length; i++) {
                 const row = parseCSVLine(lines[i]);
-                if (row.length < Math.max(purchaserEmailIndex, ticketNameIndex) + 1) {
+                if (row.length < maxColIdx + 1) {
                     continue; // Skip incomplete rows
                 }
 
-                const purchaserEmail = row[purchaserEmailIndex].trim();
-                const attendeeEmail = checkAttendee && row.length > attendeeEmailIndex ? row[attendeeEmailIndex].trim() : '';
+                const purchaseEmail = (checkPurchase && purchaseEmailIndex >= 0 && row.length > purchaseEmailIndex)
+                    ? row[purchaseEmailIndex].trim() : '';
+                const attendeeEmail = (checkAttendee && attendeeEmailIndex >= 0 && row.length > attendeeEmailIndex)
+                    ? row[attendeeEmailIndex].trim() : '';
                 const ticketName = row[ticketNameIndex].trim();
                 const ticketId = idIndex >= 0 && row[idIndex] ? row[idIndex].trim() : `Row ${i}`;
 
-                if (!purchaserEmail || !ticketName) {
+                if (!ticketName || (!purchaseEmail && !attendeeEmail)) {
                     continue; // Skip rows with missing data
                 }
 
@@ -868,25 +915,16 @@ Artist's (Included)</textarea>
                 const item = { id: ticketId, name: ticketName };
                 const isBadgeTicket = isBadge(ticketName, badgeTypes);
 
-                // Add to purchaser's account
-                const purchaserAcc = ensureAccount(purchaserEmail);
-                if (tagsIndex >= 0 && row.length > tagsIndex && validationOverrideTag) {
-                    const tags = (row[tagsIndex] || '').trim();
-                    if (tags.includes(validationOverrideTag)) {
-                        purchaserAcc.has26YKValidated = true;
-                    }
+                if (checkPurchase && purchaseEmail) {
+                    const purchaseAcc = ensureAccount(purchaseEmail);
+                    applyOverrideTag(purchaseAcc, row);
+                    addToAccount(purchaseAcc, ticketName, item, isBadgeTicket);
                 }
-                addToAccount(purchaserAcc, ticketName, item, isBadgeTicket);
 
-                // Also add to attendee's account if different from purchaser
-                if (checkAttendee && attendeeEmail && attendeeEmail.toLowerCase() !== purchaserEmail.toLowerCase()) {
+                if (checkAttendee && attendeeEmail &&
+                    (!purchaseEmail || attendeeEmail.toLowerCase() !== purchaseEmail.toLowerCase())) {
                     const attendeeAcc = ensureAccount(attendeeEmail);
-                    if (tagsIndex >= 0 && row.length > tagsIndex && validationOverrideTag) {
-                        const tags = (row[tagsIndex] || '').trim();
-                        if (tags.includes(validationOverrideTag)) {
-                            attendeeAcc.has26YKValidated = true;
-                        }
-                    }
+                    applyOverrideTag(attendeeAcc, row);
                     addToAccount(attendeeAcc, ticketName, { ...item, id: item.id + '-att' }, isBadgeTicket);
                 }
             }
