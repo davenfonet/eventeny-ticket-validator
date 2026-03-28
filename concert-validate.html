@@ -283,6 +283,13 @@
             font-size: 1.1em;
         }
 
+        .account-display-name {
+            font-size: 0.9em;
+            color: #666;
+            font-weight: normal;
+            margin-top: 4px;
+        }
+
         .account-stats {
             display: flex;
             gap: 20px;
@@ -636,18 +643,22 @@
                     <div class="setting-description">Accounts with this tag in the CSV Tags column are always marked valid</div>
                 </div>
                 <div class="setting-group">
-                    <div class="checkbox-group">
-                        <input type="checkbox" id="checkPurchaseEmail" checked />
-                        <label for="checkPurchaseEmail" style="margin: 0;">Include Purchase / Purchaser email in account aggregation</label>
+                    <label style="display: block; margin-bottom: 8px; font-weight: 600;">Who should each row count toward?</label>
+                    <div class="radio-group" style="display: flex; flex-direction: column; gap: 10px;">
+                        <label style="display: flex; align-items: flex-start; gap: 8px; margin: 0; cursor: pointer; font-weight: normal;">
+                            <input type="radio" name="accountGrouping" id="accountGroupingTicketHolder" value="ticketHolder" checked style="margin-top: 3px;" />
+                            <span><strong>Ticket holder</strong> (attendee email + name) — each badge/ticket is counted for the person attending. Best for group or school purchases where one purchaser pays for many people.</span>
+                        </label>
+                        <label style="display: flex; align-items: flex-start; gap: 8px; margin: 0; cursor: pointer; font-weight: normal;">
+                            <input type="radio" name="accountGrouping" id="accountGroupingPurchaser" value="purchaser" style="margin-top: 3px;" />
+                            <span><strong>Purchaser only</strong> — count by purchaser / purchase email (one account per paying email).</span>
+                        </label>
+                        <label style="display: flex; align-items: flex-start; gap: 8px; margin: 0; cursor: pointer; font-weight: normal;">
+                            <input type="radio" name="accountGrouping" id="accountGroupingBoth" value="both" style="margin-top: 3px;" />
+                            <span><strong>Both</strong> — separate totals for purchaser and for attendee when those emails differ (original behavior).</span>
+                        </label>
                     </div>
-                    <div class="setting-description">Uses the Purchaser email or Purchase email column. At least one of this option and Attendee email must be enabled</div>
-                </div>
-                <div class="setting-group">
-                    <div class="checkbox-group">
-                        <input type="checkbox" id="checkAttendeeEmail" checked />
-                        <label for="checkAttendeeEmail" style="margin: 0;">Include Attendee email in account aggregation</label>
-                    </div>
-                    <div class="setting-description">When checked, tickets and badges are also counted for the attendee's account (when it differs from the purchase email, or when only attendee aggregation is enabled)</div>
+                    <div class="setting-description" style="margin-top: 10px;">If attendee email is empty in ticket-holder mode, the row falls back to purchaser email so it is not dropped.</div>
                 </div>
                 <div class="setting-group">
                     <label for="badgeTypes">Badge types (one per line):</label>
@@ -735,8 +746,7 @@ Artist's (Included)</textarea>
                 fraudulentTicketTypes: fraudulentTicketTypes,
                 fraudulentTicketThreshold: parseInt(document.getElementById('fraudulentTicketThreshold').value) || 4,
                 validationOverrideTag: (document.getElementById('validationOverrideTag')?.value || '26YK-Validated').trim(),
-                checkPurchaseEmail: document.getElementById('checkPurchaseEmail')?.checked ?? true,
-                checkAttendeeEmail: document.getElementById('checkAttendeeEmail')?.checked ?? true,
+                accountGrouping: document.querySelector('input[name="accountGrouping"]:checked')?.value || 'ticketHolder',
                 badgeTypes: parseLinesFromTextarea('badgeTypes'),
                 fullAccessBadges: parseLinesFromTextarea('fullAccessBadges')
             };
@@ -800,6 +810,26 @@ Artist's (Included)</textarea>
             });
         }
 
+        function findRoleNameColumnIndices(header, role) {
+            const r = role.toLowerCase();
+            const firstIdx = header.findIndex(col => {
+                const h = col.toLowerCase();
+                return h.includes(r) && h.includes('first');
+            });
+            const lastIdx = header.findIndex(col => {
+                const h = col.toLowerCase();
+                return h.includes(r) && h.includes('last');
+            });
+            return { firstIdx, lastIdx };
+        }
+
+        function rowDisplayName(row, firstIdx, lastIdx) {
+            if (firstIdx < 0 && lastIdx < 0) return '';
+            const f = firstIdx >= 0 && row[firstIdx] ? String(row[firstIdx]).trim() : '';
+            const l = lastIdx >= 0 && row[lastIdx] ? String(row[lastIdx]).trim() : '';
+            return [f, l].filter(Boolean).join(' ').trim();
+        }
+
         // Parse CSV content
         function parseCSV(content) {
             const lines = content.split('\n').filter(line => line.trim());
@@ -813,6 +843,8 @@ Artist's (Included)</textarea>
             const attendeeEmailIndex = header.findIndex(col => 
                 col.toLowerCase().includes('attendee') && col.toLowerCase().includes('email')
             );
+            const attendeeNameIdx = findRoleNameColumnIndices(header, 'attendee');
+            const purchaserNameIdx = findRoleNameColumnIndices(header, 'purchaser');
             const ticketNameIndex = header.findIndex(col => 
                 col.toLowerCase().includes('ticket') && col.toLowerCase().includes('name')
             );
@@ -828,17 +860,17 @@ Artist's (Included)</textarea>
             }
 
             const rules = getValidationRules();
-            const checkPurchase = rules.checkPurchaseEmail;
-            const checkAttendee = rules.checkAttendeeEmail && attendeeEmailIndex >= 0;
+            const mode = rules.accountGrouping || 'ticketHolder';
+            const checkPurchase = mode === 'purchaser' || mode === 'both';
+            const checkAttendee = mode === 'both' && attendeeEmailIndex >= 0;
+            const ticketHolderMode = mode === 'ticketHolder';
+            const readPurchaseForFallback = ticketHolderMode && purchaseEmailIndex >= 0;
 
-            if (!checkPurchase && !checkAttendee) {
-                throw new Error('Enable at least one: Purchase / Purchaser email or Attendee email in account aggregation');
+            if (ticketHolderMode && attendeeEmailIndex === -1) {
+                throw new Error('Ticket holder mode requires an "Attendee email" column in the CSV');
             }
             if (checkPurchase && purchaseEmailIndex === -1) {
-                throw new Error('CSV must contain a "Purchaser email" or "Purchase email" column when purchase aggregation is enabled');
-            }
-            if (rules.checkAttendeeEmail && attendeeEmailIndex === -1) {
-                throw new Error('CSV must contain an "Attendee email" column when attendee aggregation is enabled');
+                throw new Error('CSV must contain a "Purchaser email" or "Purchase email" column for this grouping mode');
             }
 
             // Parse data rows and collect ticket types
@@ -847,10 +879,11 @@ Artist's (Included)</textarea>
             const badgeTypes = rules.badgeTypes;
             const validationOverrideTag = rules.validationOverrideTag;
 
-            function ensureAccount(email) {
+            function ensureAccount(email, displayName) {
                 if (!accounts[email]) {
                     accounts[email] = {
                         email: email,
+                        displayName: (displayName || '').trim(),
                         badges: 0,
                         tickets: 0,
                         ticketNames: [],
@@ -861,6 +894,8 @@ Artist's (Included)</textarea>
                 }
                 if (!accounts[email].badgeItems) accounts[email].badgeItems = [];
                 if (!accounts[email].ticketItems) accounts[email].ticketItems = [];
+                const dn = (displayName || '').trim();
+                if (dn && !accounts[email].displayName) accounts[email].displayName = dn;
                 return accounts[email];
             }
 
@@ -876,8 +911,15 @@ Artist's (Included)</textarea>
             }
 
             let maxColIdx = ticketNameIndex;
-            if (checkPurchase && purchaseEmailIndex >= 0) maxColIdx = Math.max(maxColIdx, purchaseEmailIndex);
-            if (checkAttendee && attendeeEmailIndex >= 0) maxColIdx = Math.max(maxColIdx, attendeeEmailIndex);
+            if ((checkPurchase || readPurchaseForFallback) && purchaseEmailIndex >= 0) {
+                maxColIdx = Math.max(maxColIdx, purchaseEmailIndex);
+            }
+            if ((checkAttendee || ticketHolderMode) && attendeeEmailIndex >= 0) {
+                maxColIdx = Math.max(maxColIdx, attendeeEmailIndex);
+            }
+            [attendeeNameIdx.firstIdx, attendeeNameIdx.lastIdx, purchaserNameIdx.firstIdx, purchaserNameIdx.lastIdx].forEach(idx => {
+                if (idx >= 0) maxColIdx = Math.max(maxColIdx, idx);
+            });
             if (idIndex >= 0) maxColIdx = Math.max(maxColIdx, idIndex);
             if (tagsIndex >= 0) maxColIdx = Math.max(maxColIdx, tagsIndex);
 
@@ -896,18 +938,32 @@ Artist's (Included)</textarea>
                     continue; // Skip incomplete rows
                 }
 
-                const purchaseEmail = (checkPurchase && purchaseEmailIndex >= 0 && row.length > purchaseEmailIndex)
+                const purchaseEmail = (purchaseEmailIndex >= 0 && row.length > purchaseEmailIndex && (checkPurchase || readPurchaseForFallback))
                     ? row[purchaseEmailIndex].trim() : '';
-                const attendeeEmail = (checkAttendee && attendeeEmailIndex >= 0 && row.length > attendeeEmailIndex)
+                const attendeeEmail = (attendeeEmailIndex >= 0 && row.length > attendeeEmailIndex)
                     ? row[attendeeEmailIndex].trim() : '';
                 const ticketName = row[ticketNameIndex].trim();
                 const ticketId = idIndex >= 0 && row[idIndex] ? row[idIndex].trim() : `Row ${i}`;
 
-                if (!ticketName || (!purchaseEmail && !attendeeEmail)) {
-                    continue; // Skip rows with missing data
+                if (ticketHolderMode) {
+                    const key = attendeeEmail || purchaseEmail;
+                    if (!ticketName || !key) continue;
+                    const disp = attendeeEmail
+                        ? rowDisplayName(row, attendeeNameIdx.firstIdx, attendeeNameIdx.lastIdx)
+                        : rowDisplayName(row, purchaserNameIdx.firstIdx, purchaserNameIdx.lastIdx);
+                    if (!isBadge(ticketName, badgeTypes)) ticketTypeSet.add(ticketName);
+                    const item = { id: ticketId, name: ticketName };
+                    const isBadgeTicket = isBadge(ticketName, badgeTypes);
+                    const acc = ensureAccount(key, disp);
+                    applyOverrideTag(acc, row);
+                    addToAccount(acc, ticketName, item, isBadgeTicket);
+                    continue;
                 }
 
-                // Collect unique ticket types (excluding badges)
+                if (!ticketName || (!purchaseEmail && !attendeeEmail)) {
+                    continue;
+                }
+
                 if (!isBadge(ticketName, badgeTypes)) {
                     ticketTypeSet.add(ticketName);
                 }
@@ -916,14 +972,16 @@ Artist's (Included)</textarea>
                 const isBadgeTicket = isBadge(ticketName, badgeTypes);
 
                 if (checkPurchase && purchaseEmail) {
-                    const purchaseAcc = ensureAccount(purchaseEmail);
+                    const dispPur = rowDisplayName(row, purchaserNameIdx.firstIdx, purchaserNameIdx.lastIdx);
+                    const purchaseAcc = ensureAccount(purchaseEmail, dispPur);
                     applyOverrideTag(purchaseAcc, row);
                     addToAccount(purchaseAcc, ticketName, item, isBadgeTicket);
                 }
 
                 if (checkAttendee && attendeeEmail &&
                     (!purchaseEmail || attendeeEmail.toLowerCase() !== purchaseEmail.toLowerCase())) {
-                    const attendeeAcc = ensureAccount(attendeeEmail);
+                    const dispAtt = rowDisplayName(row, attendeeNameIdx.firstIdx, attendeeNameIdx.lastIdx);
+                    const attendeeAcc = ensureAccount(attendeeEmail, dispAtt);
                     applyOverrideTag(attendeeAcc, row);
                     addToAccount(attendeeAcc, ticketName, { ...item, id: item.id + '-att' }, isBadgeTicket);
                 }
@@ -1114,6 +1172,14 @@ Artist's (Included)</textarea>
             document.getElementById('results').classList.add('show');
         }
 
+        function escapeHtml(s) {
+            return String(s)
+                .replace(/&/g, '&amp;')
+                .replace(/</g, '&lt;')
+                .replace(/>/g, '&gt;')
+                .replace(/"/g, '&quot;');
+        }
+
         // Render account item
         function renderAccount(account, type) {
             const badgeClass = type === 'concern' ? 'concern' :
@@ -1180,10 +1246,17 @@ Artist's (Included)</textarea>
                 `;
             }
 
+            const nameLine = (account.displayName && String(account.displayName).trim())
+                ? `<div class="account-display-name">${escapeHtml(account.displayName.trim())}</div>`
+                : '';
+
             return `
                 <div class="account-item ${type}">
                     <div class="account-header">
-                        <span class="account-email">${account.email}</span>
+                        <div>
+                            <span class="account-email">${escapeHtml(account.email)}</span>
+                            ${nameLine}
+                        </div>
                         <span class="badge ${badgeClass}">${badgeText}</span>
                     </div>
                     <div class="account-stats">
@@ -1221,6 +1294,7 @@ Artist's (Included)</textarea>
                 const issues = (acc.issues || []).map(i => i.message).join('; ');
                 rows.push({
                     Email: acc.email,
+                    Name: (acc.displayName || '').trim(),
                     Status: status,
                     'Tickets Count': acc.tickets,
                     'Badges Count': acc.badges,
